@@ -71,9 +71,9 @@ impl ApplicationHandler for App {
             let web_window = web_sys::window().unwrap();
             let document = web_window.document().unwrap();
 
-            if let Some(container) = document.get_element_by_id("canvas") {
-                // Replace placeholder with canvas
-                let _ = container.replace_with_with_node_1(&canvas);
+            if let Some(container) = document.get_element_by_id("canvas-container") {
+                // Append canvas to container
+                container.append_child(&canvas).unwrap();
             } else {
                 // Append to body
                 document.body().unwrap().append_child(&canvas).unwrap();
