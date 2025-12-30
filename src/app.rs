@@ -22,24 +22,34 @@ struct AppState {
     gpu: GpuState,
     camera: Camera,
     input: InputState,
+    #[allow(dead_code)]
     world: HoneycombWorld,
     time: f32,
-    last_frame: std::time::Instant,
+    last_frame: web_time::Instant,
+}
+
+enum AppPhase {
+    Uninitialized,
+    Initializing { window: Arc<Window> },
+    Running(AppState),
 }
 
 struct App {
-    state: Option<AppState>,
+    phase: AppPhase,
 }
 
 impl App {
     fn new() -> Self {
-        Self { state: None }
+        Self {
+            phase: AppPhase::Uninitialized,
+        }
     }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.state.is_some() {
+        // Only initialize if we haven't started yet
+        if !matches!(self.phase, AppPhase::Uninitialized) {
             return;
         }
 
@@ -75,28 +85,69 @@ impl ApplicationHandler for App {
             let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width.max(1), height.max(1)));
         }
 
-        let world = HoneycombWorld::generate(WORLD_SEED, CELL_COUNT, PHASE_COUNT);
-        let camera = Camera::new();
-        let input = InputState::new();
+        // Start async GPU initialization
+        let window_clone = window.clone();
 
-        // Initialize GPU state
-        let gpu = pollster::block_on(GpuState::new(window.clone(), &world));
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.phase = AppPhase::Initializing { window: window.clone() };
 
-        self.state = Some(AppState {
-            window,
-            gpu,
-            camera,
-            input,
-            world,
-            time: 0.0,
-            last_frame: std::time::Instant::now(),
-        });
+            // Use a static to communicate back to the app
+            // This is a workaround for WASM's async limitations with winit
+            wasm_bindgen_futures::spawn_local(async move {
+                let world = HoneycombWorld::generate(WORLD_SEED, CELL_COUNT, PHASE_COUNT);
+                let gpu = GpuState::new(window_clone.clone(), &world).await;
+
+                // Store in thread-local for retrieval
+                PENDING_STATE.with(|cell| {
+                    *cell.borrow_mut() = Some(PendingState {
+                        window: window_clone,
+                        gpu,
+                        world,
+                    });
+                });
+            });
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let world = HoneycombWorld::generate(WORLD_SEED, CELL_COUNT, PHASE_COUNT);
+            let gpu = pollster::block_on(GpuState::new(window_clone, &world));
+
+            self.phase = AppPhase::Running(AppState {
+                window,
+                gpu,
+                camera: Camera::new(),
+                input: InputState::new(),
+                world,
+                time: 0.0,
+                last_frame: web_time::Instant::now(),
+            });
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let state = match self.state.as_mut() {
-            Some(s) => s,
-            None => return,
+        // Check for pending WASM initialization
+        #[cfg(target_arch = "wasm32")]
+        if matches!(self.phase, AppPhase::Initializing { .. }) {
+            PENDING_STATE.with(|cell| {
+                if let Some(pending) = cell.borrow_mut().take() {
+                    self.phase = AppPhase::Running(AppState {
+                        window: pending.window,
+                        gpu: pending.gpu,
+                        camera: Camera::new(),
+                        input: InputState::new(),
+                        world: pending.world,
+                        time: 0.0,
+                        last_frame: web_time::Instant::now(),
+                    });
+                }
+            });
+        }
+
+        let state = match &mut self.phase {
+            AppPhase::Running(s) => s,
+            _ => return,
         };
 
         match event {
@@ -149,7 +200,7 @@ impl ApplicationHandler for App {
 
             WindowEvent::RedrawRequested => {
                 // Calculate delta time
-                let now = std::time::Instant::now();
+                let now = web_time::Instant::now();
                 let dt = (now - state.last_frame).as_secs_f32();
                 state.last_frame = now;
                 state.time += dt;
@@ -181,10 +232,28 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(state) = &self.state {
-            state.window.request_redraw();
+        match &self.phase {
+            AppPhase::Running(state) => {
+                state.window.request_redraw();
+            }
+            AppPhase::Initializing { window } => {
+                window.request_redraw();
+            }
+            _ => {}
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct PendingState {
+    window: Arc<Window>,
+    gpu: GpuState,
+    world: HoneycombWorld,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static PENDING_STATE: std::cell::RefCell<Option<PendingState>> = const { std::cell::RefCell::new(None) };
 }
 
 pub async fn run() {

@@ -33,10 +33,10 @@ cargo run --release
 
 ```bash
 ./build-web.sh
-python3 -m http.server 8080
+cargo run --bin serve
 ```
 
-Then open http://localhost:8080 in a WebGPU-enabled browser.
+Then open http://localhost:3000 in a WebGPU-enabled browser.
 
 ## Controls
 

@@ -11,6 +11,10 @@ crate-type = ["cdylib", "rlib"]
 name = "vendek"
 path = "src/main.rs"
 
+[[bin]]
+name = "serve"
+path = "src/serve.rs"
+
 [dependencies]
 wgpu = { version = "23", features = ["webgpu"] }
 winit = { version = "0.30", features = ["rwh_06"] }
@@ -20,11 +24,16 @@ rand = "0.8"
 rand_chacha = "0.3"
 log = "0.4"
 env_logger = "0.11"
+web-time = "1.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = "0.3"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tower-http = { version = "0.6", features = ["fs", "set-header"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [

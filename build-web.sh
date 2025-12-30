@@ -16,5 +16,5 @@ wasm-bindgen \
 echo "Build complete!"
 echo ""
 echo "To run locally:"
-echo "  python3 -m http.server 8080"
-echo "  Open http://localhost:8080 in Chrome 113+"
+echo "  cargo run --bin serve"
+echo "  Open http://localhost:3000 in Chrome 113+"
