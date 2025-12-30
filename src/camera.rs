@@ -20,16 +20,16 @@ impl Camera {
     pub fn new() -> Self {
         Self {
             focus: Vec3::ZERO,
-            distance: 25.0,
-            yaw: 0.0,
-            pitch: 0.3,
+            distance: 35.0,
+            yaw: 0.3,
+            pitch: 0.4,
             fov: std::f32::consts::FRAC_PI_4,
             near: 0.1,
-            far: 100.0,
+            far: 150.0,
             target_focus: Vec3::ZERO,
-            target_distance: 25.0,
-            target_yaw: 0.0,
-            target_pitch: 0.3,
+            target_distance: 35.0,
+            target_yaw: 0.3,
+            target_pitch: 0.4,
         }
     }
 

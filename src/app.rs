@@ -13,8 +13,8 @@ use crate::input::InputState;
 use crate::world::HoneycombWorld;
 
 // World generation constants
-const CELL_COUNT: usize = 64;
-const PHASE_COUNT: usize = 8;
+const CELL_COUNT: usize = 128;
+const PHASE_COUNT: usize = 12;
 const WORLD_SEED: u64 = 42;
 
 struct AppState {
@@ -71,6 +71,20 @@ impl ApplicationHandler for App {
             let web_window = web_sys::window().unwrap();
             let document = web_window.document().unwrap();
 
+            // Set canvas size BEFORE attaching to DOM
+            let width = web_window.inner_width().unwrap().as_f64().unwrap() as u32;
+            let height = web_window.inner_height().unwrap().as_f64().unwrap() as u32;
+            let width = width.max(100);
+            let height = height.max(100);
+
+            canvas.set_width(width);
+            canvas.set_height(height);
+
+            // Set explicit style dimensions too
+            let style = canvas.style();
+            let _ = style.set_property("width", &format!("{}px", width));
+            let _ = style.set_property("height", &format!("{}px", height));
+
             if let Some(container) = document.get_element_by_id("canvas-container") {
                 // Append canvas to container
                 container.append_child(&canvas).unwrap();
@@ -79,10 +93,7 @@ impl ApplicationHandler for App {
                 document.body().unwrap().append_child(&canvas).unwrap();
             }
 
-            // Set canvas size to fill viewport
-            let width = web_window.inner_width().unwrap().as_f64().unwrap() as u32;
-            let height = web_window.inner_height().unwrap().as_f64().unwrap() as u32;
-            let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width.max(1), height.max(1)));
+            let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
         }
 
         // Start async GPU initialization

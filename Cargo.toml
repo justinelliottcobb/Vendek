@@ -16,7 +16,7 @@ name = "serve"
 path = "src/serve.rs"
 
 [dependencies]
-wgpu = { version = "23", features = ["webgpu"] }
+wgpu = { version = "24", features = ["webgpu"] }
 winit = { version = "0.30", features = ["rwh_06"] }
 glam = { version = "0.29", features = ["bytemuck"] }
 bytemuck = { version = "1.16", features = ["derive"] }
@@ -36,6 +36,7 @@ tower-http = { version = "0.6", features = ["fs", "set-header"] }
 getrandom = { version = "0.2", features = ["js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Window",
     "Document",
@@ -46,6 +47,15 @@ web-sys = { version = "0.3", features = [
     "MouseEvent",
     "WheelEvent",
     "PointerEvent",
+    "Gpu",
+    "GpuAdapter",
+    "GpuCanvasContext",
+    "GpuDevice",
+    "GpuQueue",
+    "GpuTexture",
+    "GpuTextureView",
+    "Navigator",
+    "OffscreenCanvas",
 ] }
 console_error_panic_hook = "0.1"
 console_log = "1"

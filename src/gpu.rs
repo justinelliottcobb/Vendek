@@ -8,13 +8,77 @@ use winit::window::Window;
 use crate::camera::Camera;
 use crate::world::{FrameUniforms, HoneycombCell, HoneycombWorld, RaymarchParams, VendekPhase};
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+/// Parameters that can be adjusted at runtime
+#[derive(Clone, Copy)]
+pub struct RuntimeParams {
+    pub membrane_thickness: f32,
+    pub membrane_glow: f32,
+    pub step_size: f32,
+    pub density: f32,
+    pub max_steps: u32,
+    pub enable_coupling: bool,
+    pub palette: u32,
+}
+
+impl Default for RuntimeParams {
+    fn default() -> Self {
+        Self {
+            membrane_thickness: MEMBRANE_THICKNESS,
+            membrane_glow: MEMBRANE_GLOW,
+            step_size: STEP_SIZE,
+            density: 1.0,
+            max_steps: MAX_STEPS,
+            enable_coupling: true,
+            palette: 0,
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn read_js_params() -> RuntimeParams {
+    let window = web_sys::window().unwrap();
+    let params = js_sys::Reflect::get(&window, &"vendekParams".into()).ok();
+
+    if let Some(params) = params {
+        if params.is_object() {
+            let get_f32 = |key: &str, default: f32| -> f32 {
+                js_sys::Reflect::get(&params, &key.into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .map(|v| v as f32)
+                    .unwrap_or(default)
+            };
+
+            return RuntimeParams {
+                membrane_thickness: get_f32("membraneThickness", MEMBRANE_THICKNESS),
+                membrane_glow: get_f32("membraneGlow", MEMBRANE_GLOW),
+                step_size: get_f32("stepSize", STEP_SIZE),
+                density: get_f32("density", 1.0),
+                max_steps: get_f32("maxSteps", MAX_STEPS as f32) as u32,
+                enable_coupling: get_f32("enableCoupling", 1.0) > 0.5,
+                palette: get_f32("palette", 0.0) as u32,
+            };
+        }
+    }
+
+    RuntimeParams::default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_js_params() -> RuntimeParams {
+    RuntimeParams::default()
+}
+
 // Constants for initial visualization
 const VOLUME_MIN: Vec3 = Vec3::new(-12.0, -12.0, -12.0);
 const VOLUME_MAX: Vec3 = Vec3::new(12.0, 12.0, 12.0);
-const MAX_STEPS: u32 = 256;
-const STEP_SIZE: f32 = 0.08;
-const MEMBRANE_THICKNESS: f32 = 0.15;
-const MEMBRANE_GLOW: f32 = 2.0;
+const MAX_STEPS: u32 = 128;
+const STEP_SIZE: f32 = 0.15;
+const MEMBRANE_THICKNESS: f32 = 0.4;
+const MEMBRANE_GLOW: f32 = 0.5;
 
 pub struct GpuState {
     pub surface: wgpu::Surface<'static>,
@@ -49,11 +113,37 @@ pub struct GpuState {
 impl GpuState {
     pub async fn new(window: Arc<Window>, world: &HoneycombWorld) -> Self {
         let size = window.inner_size();
-        let width = size.width.max(1);
-        let height = size.height.max(1);
+        let mut width = size.width.max(1);
+        let mut height = size.height.max(1);
+
+        // On WASM, window.inner_size() can return incorrect values
+        // Fall back to querying the window dimensions directly
+        #[cfg(target_arch = "wasm32")]
+        {
+            let web_window = web_sys::window().unwrap();
+            let fallback_width = web_window.inner_width().unwrap().as_f64().unwrap() as u32;
+            let fallback_height = web_window.inner_height().unwrap().as_f64().unwrap() as u32;
+
+            web_sys::console::log_1(&format!(
+                "GPU init - winit size: {}x{}, web_sys size: {}x{}",
+                width, height, fallback_width, fallback_height
+            ).into());
+
+            // Use web_sys dimensions if winit reports tiny values
+            if width < 100 || height < 100 {
+                width = fallback_width.max(100);
+                height = fallback_height.max(100);
+                web_sys::console::log_1(&format!(
+                    "Using fallback dimensions: {}x{}", width, height
+                ).into());
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        log::info!("GPU init - size: {}x{}", width, height);
 
         // Create wgpu instance
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
             #[cfg(target_arch = "wasm32")]
@@ -152,6 +242,10 @@ impl GpuState {
             step_size: STEP_SIZE,
             membrane_thickness: MEMBRANE_THICKNESS,
             membrane_glow: MEMBRANE_GLOW,
+            density_multiplier: 1.0,
+            enable_coupling: 1.0,
+            palette: 0,
+            _pad2: 0,
         };
 
         let raymarch_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -457,15 +551,32 @@ impl GpuState {
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            self.size = new_size;
-            self.config.width = new_size.width;
-            self.config.height = new_size.height;
+        let mut width = new_size.width;
+        let mut height = new_size.height;
+
+        // On WASM, resize can be called with tiny values
+        #[cfg(target_arch = "wasm32")]
+        {
+            if width < 100 || height < 100 {
+                let web_window = web_sys::window().unwrap();
+                width = web_window.inner_width().unwrap().as_f64().unwrap() as u32;
+                height = web_window.inner_height().unwrap().as_f64().unwrap() as u32;
+            }
+            web_sys::console::log_1(&format!(
+                "Resize called: input {}x{}, using {}x{}",
+                new_size.width, new_size.height, width, height
+            ).into());
+        }
+
+        if width > 0 && height > 0 {
+            self.size = winit::dpi::PhysicalSize::new(width, height);
+            self.config.width = width;
+            self.config.height = height;
             self.surface.configure(&self.device, &self.config);
 
             // Recreate storage texture
             let (storage_texture, storage_texture_view) =
-                Self::create_storage_texture(&self.device, new_size.width, new_size.height);
+                Self::create_storage_texture(&self.device, width, height);
             self.storage_texture = storage_texture;
             self.storage_texture_view = storage_texture_view;
 
@@ -501,6 +612,9 @@ impl GpuState {
     }
 
     pub fn render(&mut self, camera: &Camera, time: f32) -> Result<(), wgpu::SurfaceError> {
+        // Read runtime parameters from JavaScript
+        let runtime_params = read_js_params();
+
         // Update frame uniforms
         let aspect = self.size.width as f32 / self.size.height as f32;
         let view = camera.view_matrix();
@@ -522,6 +636,28 @@ impl GpuState {
             &self.frame_uniform_buffer,
             0,
             bytemuck::cast_slice(&[frame_uniforms]),
+        );
+
+        // Update raymarch params with runtime values
+        let raymarch_params = RaymarchParams {
+            volume_min: VOLUME_MIN,
+            _pad0: 0.0,
+            volume_max: VOLUME_MAX,
+            _pad1: 0.0,
+            max_steps: runtime_params.max_steps,
+            step_size: runtime_params.step_size,
+            membrane_thickness: runtime_params.membrane_thickness,
+            membrane_glow: runtime_params.membrane_glow,
+            density_multiplier: runtime_params.density,
+            enable_coupling: if runtime_params.enable_coupling { 1.0 } else { 0.0 },
+            palette: runtime_params.palette,
+            _pad2: 0,
+        };
+
+        self.queue.write_buffer(
+            &self.raymarch_params_buffer,
+            0,
+            bytemuck::cast_slice(&[raymarch_params]),
         );
 
         // Get output texture
